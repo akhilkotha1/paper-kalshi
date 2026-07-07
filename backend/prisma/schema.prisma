@@ -1,0 +1,216 @@
+// ============================================================
+// Paper Kalshi Clone — Prisma schema
+// Run `npx prisma migrate dev --name init` to create these
+// tables in your Supabase Postgres instance.
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// Enums
+enum MarketStatus {
+  open
+  closed
+  settled
+
+  @@map("market_status")
+}
+
+enum ContractSide {
+  yes
+  no
+
+  @@map("contract_side")
+}
+
+enum TradeAction {
+  buy
+  sell
+
+  @@map("trade_action")
+}
+
+enum TransactionType {
+  buy
+  sell
+  payout
+  deposit
+  adjustment
+  fee
+
+  @@map("transaction_type")
+}
+
+enum ResolutionResult {
+  yes
+  no
+  void
+
+  @@map("resolution_result")
+}
+
+// PROFILES — user info, fake balance, stats
+// Note: `id` is NOT declared as a Prisma relation to auth.users,
+// because Prisma only manages the `public` schema. The actual
+// foreign key + auto-create trigger are added via raw SQL in
+// supabase_auth_setup.sql after your first migration runs.
+model Profile {
+  id                 String   @id @db.Uuid
+  username           String   @unique
+  displayName        String?  @map("display_name")
+  avatarUrl          String?  @map("avatar_url")
+
+  balanceCents       BigInt   @default(1000000) @map("balance_cents")
+
+  totalTrades        Int      @default(0) @map("total_trades")
+  wins               Int      @default(0)
+  losses             Int      @default(0)
+  realizedPnlCents   BigInt   @default(0) @map("realized_pnl_cents")
+
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @default(now()) @updatedAt @map("updated_at")
+
+  positions          Position[]
+  trades             Trade[]
+  transactions       Transaction[]
+
+  @@map("profiles")
+}
+
+//  MARKETS — cached market data from Kalshi
+model Market {
+  id                String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  kalshiTicker      String       @unique @map("kalshi_ticker")
+  eventTicker       String       @map("event_ticker")
+  seriesTicker      String?      @map("series_ticker")
+
+  title             String
+  subtitle          String?
+  category          String?
+
+  yesBidCents       Int?         @map("yes_bid_cents") @db.SmallInt
+  yesAskCents       Int?         @map("yes_ask_cents") @db.SmallInt
+  noBidCents        Int?         @map("no_bid_cents") @db.SmallInt
+  noAskCents        Int?         @map("no_ask_cents") @db.SmallInt
+  lastPriceCents    Int?         @map("last_price_cents") @db.SmallInt
+
+  volume            BigInt       @default(0)
+  openInterest      BigInt       @default(0) @map("open_interest")
+
+  openTime          DateTime?    @map("open_time")
+  closeTime         DateTime?    @map("close_time")
+  expirationTime    DateTime?    @map("expiration_time")
+
+  status            MarketStatus @default(open)
+
+  rawData           Json?        @map("raw_data")
+  lastSyncedAt      DateTime     @default(now()) @map("last_synced_at")
+  createdAt         DateTime     @default(now()) @map("created_at")
+
+  positions         Position[]
+  trades            Trade[]
+  transactions      Transaction[]
+  resolution        MarketResolution?
+
+  @@index([eventTicker])
+  @@index([status])
+  @@index([closeTime])
+  @@map("markets")
+}
+
+//  POSITIONS — user holdings (YES/NO shares) per market
+model Position {
+  id                  String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId              String       @map("user_id") @db.Uuid
+  marketId            String       @map("market_id") @db.Uuid
+  side                ContractSide
+
+  quantity            Int          @default(0)
+  avgCostCents        Decimal      @default(0) @map("avg_cost_cents") @db.Decimal(6, 2)
+
+  realizedPnlCents    BigInt       @default(0) @map("realized_pnl_cents")
+  closed              Boolean      @default(false)
+
+  createdAt           DateTime     @default(now()) @map("created_at")
+  updatedAt           DateTime     @default(now()) @updatedAt @map("updated_at")
+
+  profile             Profile      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  market              Market       @relation(fields: [marketId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, marketId, side])
+  @@index([userId])
+  @@index([marketId])
+  @@map("positions")
+}
+
+// TRADES — all buy/sell actions
+model Trade {
+  id                     String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId                 String       @map("user_id") @db.Uuid
+  marketId               String       @map("market_id") @db.Uuid
+
+  side                   ContractSide
+  action                 TradeAction
+  quantity               Int
+  priceCents             Int          @map("price_cents") @db.SmallInt
+
+  costCents              BigInt       @map("cost_cents")
+  marketPriceSnapshot    Json?        @map("market_price_snapshot")
+
+  createdAt              DateTime     @default(now()) @map("created_at")
+
+  profile                Profile       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  market                 Market        @relation(fields: [marketId], references: [id], onDelete: Cascade)
+  transactions           Transaction[]
+
+  @@index([userId, createdAt])
+  @@index([marketId, createdAt])
+  @@map("trades")
+}
+
+//  TRANSACTIONS — cash movements (buy, sell, payout, etc.)
+model Transaction {
+  id                   String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId               String          @map("user_id") @db.Uuid
+
+  type                 TransactionType
+  amountCents          BigInt          @map("amount_cents")
+  balanceAfterCents    BigInt          @map("balance_after_cents")
+
+  relatedTradeId       String?         @map("related_trade_id") @db.Uuid
+  relatedMarketId      String?         @map("related_market_id") @db.Uuid
+
+  description          String?
+  createdAt            DateTime        @default(now()) @map("created_at")
+
+  profile              Profile   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  trade                Trade?    @relation(fields: [relatedTradeId], references: [id], onDelete: SetNull)
+  market               Market?   @relation(fields: [relatedMarketId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@map("transactions")
+}
+
+//  MARKET_RESOLUTIONS — final outcome of markets
+model MarketResolution {
+  id                          String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  marketId                    String           @unique @map("market_id") @db.Uuid
+
+  result                      ResolutionResult
+  payoutPerContractCents      Int              @default(100) @map("payout_per_contract_cents") @db.SmallInt
+
+  resolvedAt                  DateTime         @default(now()) @map("resolved_at")
+  source                      String           @default("kalshi_api")
+  rawData                     Json?            @map("raw_data")
+
+  createdAt                   DateTime         @default(now()) @map("created_at")
+
+  market                      Market           @relation(fields: [marketId], references: [id], onDelete: Cascade)
+
+  @@map("market_resolutions")
+}
