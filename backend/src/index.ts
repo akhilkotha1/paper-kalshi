@@ -3,12 +3,13 @@
 //   - one real route (GET /api/markets) that queries database
 //     via Prisma and returns it as JSON
 //
-// Run this with:  npx tsx watch src/index.ts
+// Run with npx tsx watch src/index.ts
 
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import { prisma } from "./lib/prisma.js"; // note the .js extension — required under ESM + nodenext, even though the source file is .ts
+import { requireAuth } from "./middleware/requireAuth.js";
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -41,17 +42,24 @@ app.get("/api/markets/:id", async (req, res) => {
     const market = await prisma.market.findUnique({
       where: { id: req.params.id },
     });
- 
+
     if (!market) {
       res.status(404).json({ error: "Market not found" });
       return;
     }
- 
+
     res.json(market);
   } catch (err) {
     console.error("Failed to fetch market:", err);
     res.status(500).json({ error: "Failed to fetch market" });
   }
+});
+
+// Protected test route that requires a valid Supabase login token.
+// Try hitting this without a token first (expect 401), then with
+// one (expect user id + email back).
+app.get("/api/me", requireAuth, (req, res) => {
+  res.json({ user: req.user });
 });
 
 app.listen(PORT, () => {
