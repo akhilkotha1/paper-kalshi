@@ -35,6 +35,25 @@ app.get("/api/markets", async (_req, res) => {
   }
 });
 
+// Fetch a single market by its internal id
+app.get("/api/markets/:id", async (req, res) => {
+  try {
+    const market = await prisma.market.findUnique({
+      where: { id: req.params.id },
+    });
+ 
+    if (!market) {
+      res.status(404).json({ error: "Market not found" });
+      return;
+    }
+ 
+    res.json(market);
+  } catch (err) {
+    console.error("Failed to fetch market:", err);
+    res.status(500).json({ error: "Failed to fetch market" });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Server running at http://localhost:${PORT}`);
 });
