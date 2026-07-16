@@ -13,3 +13,9 @@ if (!supabaseUrl || !supabasePublishableKey) {
 }
 
 export const supabase = createClient(supabaseUrl, supabasePublishableKey);
+
+// makes the client reachable from the browser
+// console as `window.supabase`, so I can grab a token for testing
+if (import.meta.env.DEV) {
+  (window as unknown as { supabase: typeof supabase }).supabase = supabase;
+}
