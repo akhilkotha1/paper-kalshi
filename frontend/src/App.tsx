@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "./lib/supabaseClient";
 import { Auth } from "./components/Auth";
+import { MarketsList } from "./components/MarketsList";
 
 function App() {
   const [session, setSession] = useState<Session | null>(null);
@@ -9,13 +10,13 @@ function App() {
 
   useEffect(() => {
     // On first load, check if there's already a logged-in session
-    // stored in the browser 
+    // stored in the browser
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session);
       setLoading(false);
     });
 
-    // Subscribe to auth changes, this fires automatically whenever
+    // Subscribe to auth changes this fires automatically whenever
     // someone logs in, logs out, or their session refreshes. This is
     // what makes the UI update the instant Auth.tsx's handleLogIn
     // succeeds, with no manual wiring between the two components
@@ -50,6 +51,9 @@ function App() {
       ) : (
         <Auth />
       )}
+
+      <h2>Markets</h2>
+      <MarketsList />
     </div>
   );
 }
