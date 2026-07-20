@@ -11,6 +11,12 @@ import cors from "cors";
 import { prisma } from "./lib/prisma.js"; // note the .js extension — required under ESM + nodenext, even though the source file is .ts
 import { requireAuth } from "./middleware/requireAuth.js";
 
+// Postgres bigint columns come back from Prisma as JavaScript's
+// BigInt type, need to change
+(BigInt.prototype as unknown as { toJSON: () => string }).toJSON = function () {
+  return this.toString();
+};
+
 const app = express();
 const PORT = process.env.PORT || 3001;
 
