@@ -1,35 +1,51 @@
+// src/scripts/syncMarkets.ts
+//
 // Fetches real markets from Kalshi's public API and saves them into
-// markets table via Prisma
-
-// Later this becomes something that will run on a repeating timer, but
-// for now we're just proving the whole chain works: Kalshi -> 
-// database ->  API ->  frontend
+// your `markets` table via Prisma. Run manually for now:
+//
+//   npx tsx src/scripts/syncMarkets.ts
+//
+// IMPORTANT: we hit the /events endpoint, not /markets directly.
+// Kalshi's docs confirm GET /events excludes multivariate (MVE)
+// combo markets automatically — that's what was flooding our
+// earlier attempts with garbled, zero-price junk. /events also
+// carries `category`, which turns out to live at the event level,
+// not on individual markets (why category kept coming back empty).
+// with_nested_markets=true bundles each event's real markets into
+// the same response, so we don't need a second call per event.
 
 import "dotenv/config";
 import { prisma } from "../lib/prisma.js";
 
 const KALSHI_API_BASE = "https://external-api.kalshi.com/trade-api/v2";
 
-// The shape of one market object as Kalshi's API returns it
-// Not exhaustive, just the fields we actually use
+// Shape of one market, as nested inside an event's `markets` array.
 type KalshiMarket = {
   ticker: string;
   event_ticker: string;
-  series_ticker?: string;
   title: string;
-  subtitle?: string;
-  category?: string;
-  yes_bid?: number;
-  yes_ask?: number;
-  no_bid?: number;
-  no_ask?: number;
-  last_price?: number;
-  volume?: number;
-  open_interest?: number;
+  yes_sub_title?: string;
+  no_sub_title?: string;
+  yes_bid_dollars?: string;
+  yes_ask_dollars?: string;
+  no_bid_dollars?: string;
+  no_ask_dollars?: string;
+  last_price_dollars?: string;
+  volume_fp?: string;
+  open_interest_fp?: string;
   open_time?: string;
   close_time?: string;
   expiration_time?: string;
   status: string;
+};
+
+// Shape of one event, which is what we're actually paginating over.
+type KalshiEvent = {
+  event_ticker: string;
+  series_ticker?: string;
+  title: string;
+  category?: string;
+  markets?: KalshiMarket[];
 };
 
 function mapStatus(kalshiStatus: string): "open" | "closed" | "settled" {
@@ -38,45 +54,89 @@ function mapStatus(kalshiStatus: string): "open" | "closed" | "settled" {
   return "open";
 }
 
-async function fetchOpenMarkets(): Promise<KalshiMarket[]> {
-  const url = new URL(`${KALSHI_API_BASE}/markets`);
-  url.searchParams.set("status", "open");
-  url.searchParams.set("limit", "100"); // small batch for a first test run
+function dollarsToCents(value: string | undefined): number | null {
+  if (value === undefined) return null;
+  const parsed = parseFloat(value);
+  if (Number.isNaN(parsed)) return null;
+  return Math.round(parsed * 100);
+}
 
-  const res = await fetch(url.toString());
+function toInt(value: string | undefined): number {
+  if (value === undefined) return 0;
+  const parsed = parseFloat(value);
+  return Number.isNaN(parsed) ? 0 : Math.round(parsed);
+}
 
-  if (!res.ok) {
-    throw new Error(`Kalshi API error ${res.status}: ${await res.text()}`);
+// Fetches events (with nested markets) until we've collected enough
+// real markets, or run out of pages.
+async function fetchEventsWithMarkets(): Promise<
+  { market: KalshiMarket; event: KalshiEvent }[]
+> {
+  const collected: { market: KalshiMarket; event: KalshiEvent }[] = [];
+  let cursor: string | undefined;
+  let pagesChecked = 0;
+  const MAX_PAGES = 10;
+  const TARGET_COUNT = 100;
+
+  while (pagesChecked < MAX_PAGES && collected.length < TARGET_COUNT) {
+    const url = new URL(`${KALSHI_API_BASE}/events`);
+    url.searchParams.set("status", "open");
+    url.searchParams.set("with_nested_markets", "true");
+    url.searchParams.set("limit", "200");
+    if (cursor) url.searchParams.set("cursor", cursor);
+
+    const res = await fetch(url.toString());
+    if (!res.ok) {
+      throw new Error(`Kalshi API error ${res.status}: ${await res.text()}`);
+    }
+
+    const data = await res.json();
+    const events: KalshiEvent[] = data.events ?? [];
+
+    let pageMarketCount = 0;
+    for (const event of events) {
+      for (const market of event.markets ?? []) {
+        collected.push({ market, event });
+        pageMarketCount++;
+      }
+    }
+
+    console.log(
+      `Page ${pagesChecked + 1}: got ${events.length} events, ${pageMarketCount} markets.`
+    );
+
+    pagesChecked++;
+    cursor = data.cursor || undefined;
+    if (!cursor) break;
   }
 
-  const data = await res.json();
-  return data.markets ?? [];
+  return collected;
 }
 
 async function main() {
-  console.log("Fetching open markets from Kalshi...");
-  const kalshiMarkets = await fetchOpenMarkets();
-  console.log(`Got ${kalshiMarkets.length} markets from Kalshi.`);
+  console.log("Fetching open events (with nested markets) from Kalshi...");
+  const items = await fetchEventsWithMarkets();
+  console.log(`\nCollected ${items.length} real markets total.\n`);
 
   let savedCount = 0;
 
-  for (const m of kalshiMarkets) {
+  for (const { market: m, event } of items) {
     await prisma.market.upsert({
       where: { kalshiTicker: m.ticker },
       create: {
         kalshiTicker: m.ticker,
         eventTicker: m.event_ticker,
-        seriesTicker: m.series_ticker ?? null,
-        title: m.title,
-        subtitle: m.subtitle ?? null,
-        category: m.category ?? null,
-        yesBidCents: m.yes_bid ?? null,
-        yesAskCents: m.yes_ask ?? null,
-        noBidCents: m.no_bid ?? null,
-        noAskCents: m.no_ask ?? null,
-        lastPriceCents: m.last_price ?? null,
-        volume: m.volume ?? 0,
-        openInterest: m.open_interest ?? 0,
+        seriesTicker: event.series_ticker ?? null,
+        title: m.title || event.title,
+        subtitle: m.yes_sub_title ?? null,
+        category: event.category ?? null,
+        yesBidCents: dollarsToCents(m.yes_bid_dollars),
+        yesAskCents: dollarsToCents(m.yes_ask_dollars),
+        noBidCents: dollarsToCents(m.no_bid_dollars),
+        noAskCents: dollarsToCents(m.no_ask_dollars),
+        lastPriceCents: dollarsToCents(m.last_price_dollars),
+        volume: toInt(m.volume_fp),
+        openInterest: toInt(m.open_interest_fp),
         openTime: m.open_time ? new Date(m.open_time) : null,
         closeTime: m.close_time ? new Date(m.close_time) : null,
         expirationTime: m.expiration_time ? new Date(m.expiration_time) : null,
@@ -84,13 +144,14 @@ async function main() {
         rawData: m,
       },
       update: {
-        yesBidCents: m.yes_bid ?? null,
-        yesAskCents: m.yes_ask ?? null,
-        noBidCents: m.no_bid ?? null,
-        noAskCents: m.no_ask ?? null,
-        lastPriceCents: m.last_price ?? null,
-        volume: m.volume ?? 0,
-        openInterest: m.open_interest ?? 0,
+        category: event.category ?? null,
+        yesBidCents: dollarsToCents(m.yes_bid_dollars),
+        yesAskCents: dollarsToCents(m.yes_ask_dollars),
+        noBidCents: dollarsToCents(m.no_bid_dollars),
+        noAskCents: dollarsToCents(m.no_ask_dollars),
+        lastPriceCents: dollarsToCents(m.last_price_dollars),
+        volume: toInt(m.volume_fp),
+        openInterest: toInt(m.open_interest_fp),
         status: mapStatus(m.status),
         rawData: m,
         lastSyncedAt: new Date(),
