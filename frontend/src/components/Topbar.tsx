@@ -1,11 +1,14 @@
 // src/components/Topbar.tsx
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
 import { authFetch } from "../lib/authFetch";
 
 export function Topbar() {
+  const navigate = useNavigate();
   const [email, setEmail] = useState<string | null>(null);
   const [balanceCents, setBalanceCents] = useState<number | null>(null);
+  const [searchInput, setSearchInput] = useState("");
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -31,6 +34,13 @@ export function Topbar() {
       <input
         type="text"
         placeholder="Search markets..."
+        value={searchInput}
+        onChange={(e) => setSearchInput(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && searchInput.trim()) {
+            navigate(`/markets?q=${encodeURIComponent(searchInput.trim())}`);
+          }
+        }}
         className="flex-1 max-w-md rounded-lg border border-gray-200 px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
       />
 

@@ -46,6 +46,9 @@ export function MarketDetailPage() {
 
   useEffect(() => {
     loadMarket();
+    const interval = setInterval(loadMarket, 15_000); // live-updating price
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   async function handleTrade(side: "yes" | "no") {
