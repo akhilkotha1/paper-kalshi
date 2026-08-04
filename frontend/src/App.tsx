@@ -1,9 +1,12 @@
+// src/App.tsx
 import { Routes, Route } from "react-router-dom";
 import { AppShell } from "./layouts/AppShell";
 import { HomePage } from "./pages/HomePage";
 import { LoginPage } from "./pages/LoginPage";
 import { MarketsPage } from "./pages/MarketsPage";
 import { MarketDetailPage } from "./pages/MarketDetailPage";
+import { PortfolioPage } from "./pages/PortfolioPage";
+import { TransactionsPage } from "./pages/TransactionsPage";
 import { ComingSoonPage } from "./pages/ComingSoonPage";
 
 function App() {
@@ -18,9 +21,9 @@ function App() {
         <Route path="/dashboard" element={<ComingSoonPage title="Dashboard" />} />
         <Route path="/markets" element={<MarketsPage />} />
         <Route path="/markets/:id" element={<MarketDetailPage />} />
-        <Route path="/portfolio" element={<ComingSoonPage title="Portfolio" />} />
+        <Route path="/portfolio" element={<PortfolioPage />} />
         <Route path="/leaderboard" element={<ComingSoonPage title="Leaderboard" />} />
-        <Route path="/transactions" element={<ComingSoonPage title="Transactions" />} />
+        <Route path="/transactions" element={<TransactionsPage />} />
         <Route path="/profile" element={<ComingSoonPage title="Profile & Settings" />} />
       </Route>
     </Routes>
