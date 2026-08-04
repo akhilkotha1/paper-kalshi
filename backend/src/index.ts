@@ -114,6 +114,60 @@ app.post("/api/trades", requireAuth, async (req, res) => {
   }
 });
 
+// Current user's profile (balance, stats) — powers the real balance
+// shown in the frontend's top bar.
+app.get("/api/profile", requireAuth, async (req, res) => {
+  try {
+    const profile = await prisma.profile.findUnique({
+      where: { id: req.user!.id },
+    });
+
+    if (!profile) {
+      res.status(404).json({ error: "Profile not found" });
+      return;
+    }
+
+    res.json(profile);
+  } catch (err) {
+    console.error("Failed to fetch profile:", err);
+    res.status(500).json({ error: "Failed to fetch profile" });
+  }
+});
+
+// Current user's open positions, with the related market's info
+// included — so the frontend doesn't need a second request per row.
+app.get("/api/portfolio", requireAuth, async (req, res) => {
+  try {
+    const positions = await prisma.position.findMany({
+      where: { userId: req.user!.id, quantity: { gt: 0 } },
+      include: { market: true },
+      orderBy: { updatedAt: "desc" },
+    });
+
+    res.json(positions);
+  } catch (err) {
+    console.error("Failed to fetch portfolio:", err);
+    res.status(500).json({ error: "Failed to fetch portfolio" });
+  }
+});
+
+// Current user's full cash transaction history.
+app.get("/api/transactions", requireAuth, async (req, res) => {
+  try {
+    const transactions = await prisma.transaction.findMany({
+      where: { userId: req.user!.id },
+      include: { market: true },
+      orderBy: { createdAt: "desc" },
+      take: 100,
+    });
+
+    res.json(transactions);
+  } catch (err) {
+    console.error("Failed to fetch transactions:", err);
+    res.status(500).json({ error: "Failed to fetch transactions" });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Server running at http://localhost:${PORT}`);
 });
