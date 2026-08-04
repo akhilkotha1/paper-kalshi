@@ -1,12 +1,23 @@
+// src/components/Topbar.tsx
 import { useEffect, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
+import { authFetch } from "../lib/authFetch";
 
 export function Topbar() {
   const [email, setEmail] = useState<string | null>(null);
+  const [balanceCents, setBalanceCents] = useState<number | null>(null);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
-      setEmail(data.session?.user.email ?? null);
+      const currentEmail = data.session?.user.email ?? null;
+      setEmail(currentEmail);
+
+      if (currentEmail) {
+        authFetch("/api/profile")
+          .then((res) => res.json())
+          .then((profile) => setBalanceCents(Number(profile.balanceCents)))
+          .catch((err) => console.error("Failed to fetch profile:", err));
+      }
     });
   }, []);
 
@@ -24,11 +35,16 @@ export function Topbar() {
       />
 
       <div className="ml-auto flex items-center gap-4">
-        {/* Real balance comes from the backend once /api/profile exists, placeholder for now */}
-        <div className="rounded-lg bg-green-50 px-3 py-1.5 text-sm">
-          <span className="font-semibold text-green-700">$10,000.00</span>
-          <span className="text-green-600 ml-1">Fake Cash</span>
-        </div>
+        {email && (
+          <div className="rounded-lg bg-green-50 px-3 py-1.5 text-sm">
+            <span className="font-semibold text-green-700">
+              {balanceCents !== null
+                ? `$${(balanceCents / 100).toFixed(2)}`
+                : "..."}
+            </span>
+            <span className="text-green-600 ml-1">Fake Cash</span>
+          </div>
+        )}
 
         {email ? (
           <button

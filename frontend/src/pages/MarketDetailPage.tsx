@@ -1,6 +1,7 @@
 // src/pages/MarketDetailPage.tsx
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import { authFetch } from "../lib/authFetch";
 
 type Market = {
   id: string;
@@ -21,7 +22,12 @@ export function MarketDetailPage() {
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  useEffect(() => {
+  const [quantity, setQuantity] = useState(10);
+  const [tradeError, setTradeError] = useState<string | null>(null);
+  const [tradeSuccess, setTradeSuccess] = useState<string | null>(null);
+  const [placingTrade, setPlacingTrade] = useState(false);
+
+  function loadMarket() {
     fetch(`${API_URL}/api/markets/${id}`)
       .then((res) => {
         if (!res.ok) throw new Error(`Server responded with ${res.status}`);
@@ -36,7 +42,54 @@ export function MarketDetailPage() {
         setErrorMessage("Could not load this market.");
         setLoading(false);
       });
+  }
+
+  useEffect(() => {
+    loadMarket();
   }, [id]);
+
+  async function handleTrade(side: "yes" | "no") {
+    if (!market) return;
+    const priceCents = side === "yes" ? market.yesBidCents : market.noBidCents;
+
+    if (priceCents === null) {
+      setTradeError("This market has no active price right now.");
+      return;
+    }
+
+    setTradeError(null);
+    setTradeSuccess(null);
+    setPlacingTrade(true);
+
+    try {
+      const res = await authFetch("/api/trades", {
+        method: "POST",
+        body: JSON.stringify({
+          marketId: market.id,
+          side,
+          action: "buy",
+          quantity,
+          priceCents,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || "Trade failed");
+      }
+
+      setTradeSuccess(
+        `Bought ${quantity} ${side.toUpperCase()} @ ${priceCents}¢`
+      );
+      loadMarket(); // refresh prices/volume after the trade
+    } catch (err) {
+      console.error("Trade failed:", err);
+      setTradeError(err instanceof Error ? err.message : "Trade failed");
+    } finally {
+      setPlacingTrade(false);
+    }
+  }
 
   if (loading) return <p className="text-gray-500">Loading...</p>;
   if (errorMessage) return <p className="text-red-600">{errorMessage}</p>;
@@ -70,8 +123,6 @@ export function MarketDetailPage() {
           {Number(market.volume).toLocaleString()} vol
         </p>
 
-        {/* Price chart is a later addition — needs historical price data
-            we aren't storing yet. Showing current prices plainly for now. */}
         <div className="mt-6 rounded-xl border border-gray-200 bg-white p-6 flex gap-8">
           <div>
             <p className="text-sm text-gray-500">Yes</p>
@@ -92,20 +143,45 @@ export function MarketDetailPage() {
         <div className="rounded-xl border border-gray-200 bg-white p-5">
           <h2 className="font-semibold text-gray-900">Trade</h2>
 
+          <div className="mt-4">
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Quantity
+            </label>
+            <input
+              type="number"
+              min={1}
+              value={quantity}
+              onChange={(e) => setQuantity(Number(e.target.value))}
+              className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
+            />
+          </div>
+
           <div className="mt-4 grid grid-cols-2 gap-3">
-            <button className="rounded-lg bg-green-50 py-2.5 text-sm font-semibold text-green-700">
+            <button
+              onClick={() => handleTrade("yes")}
+              disabled={placingTrade}
+              className="rounded-lg bg-green-50 py-2.5 text-sm font-semibold text-green-700 disabled:opacity-50"
+            >
               Buy Yes {market.yesBidCents ?? "—"}¢
             </button>
-            <button className="rounded-lg bg-red-50 py-2.5 text-sm font-semibold text-red-700">
+            <button
+              onClick={() => handleTrade("no")}
+              disabled={placingTrade}
+              className="rounded-lg bg-red-50 py-2.5 text-sm font-semibold text-red-700 disabled:opacity-50"
+            >
               Buy No {market.noBidCents ?? "—"}¢
             </button>
           </div>
 
-          {/* Trading isn't wired up yet — this needs a POST /api/trades
-              route on the backend, calling the execute_trade function.
-              That's next. Buttons are visible but non-functional for now. */}
+          {tradeError && (
+            <p className="mt-3 text-sm text-red-600">{tradeError}</p>
+          )}
+          {tradeSuccess && (
+            <p className="mt-3 text-sm text-green-700">{tradeSuccess}</p>
+          )}
+
           <p className="mt-4 text-xs text-gray-400">
-            Trading isn't connected yet — coming in the next step.
+            Not logged in? You'll get an auth error — log in first at /login.
           </p>
         </div>
       </div>
