@@ -1,9 +1,11 @@
+// src/index.ts
+//
 // Entry point for the backend API server. Right now this has:
 //   - a health check route, just to confirm the server is alive
-//   - one real route (GET /api/markets) that queries database
+//   - one real route (GET /api/markets) that queries your database
 //     via Prisma and returns it as JSON
 //
-// Run with npx tsx watch src/index.ts
+// Run with:  npx tsx watch src/index.ts
 
 import "dotenv/config";
 import express from "express";
@@ -11,8 +13,12 @@ import cors from "cors";
 import { prisma } from "./lib/prisma.js"; // note the .js extension — required under ESM + nodenext, even though the source file is .ts
 import { requireAuth } from "./middleware/requireAuth.js";
 
-// Postgres bigint columns come back from Prisma as JavaScript's
-// BigInt type, need to change
+// Postgres `bigint` columns come back from Prisma as JavaScript's
+// BigInt type. JSON.stringify doesn't know how to serialize BigInt
+// by default and throws — this teaches it to convert BigInts to
+// plain strings whenever any route sends JSON. Without this, any
+// route touching a bigint column (volume, balance_cents, etc.)
+// crashes the moment it has real data to return.
 (BigInt.prototype as unknown as { toJSON: () => string }).toJSON = function () {
   return this.toString();
 };
@@ -61,11 +67,51 @@ app.get("/api/markets/:id", async (req, res) => {
   }
 });
 
-// Protected test route that requires a valid Supabase login token.
-// Try hitting this without a token first (expect 401), then with
-// one (expect user id + email back).
+// Protected test route — requires a valid Supabase login token.
+// Try hitting this WITHOUT a token first (expect 401), then WITH
+// one (expect your user id + email back).
 app.get("/api/me", requireAuth, (req, res) => {
   res.json({ user: req.user });
+});
+
+// Execute a trade (buy or sell). Requires login. Calls the
+// execute_trade Postgres function via a raw SQL query — Prisma
+// doesn't know about custom database functions the way it knows
+// about your tables, so $queryRaw is how we reach it. The template
+// syntax (${...}) is Prisma's safe way of inserting values into raw
+// SQL — it parameterizes them properly instead of just concatenating
+// strings, which avoids SQL injection.
+app.post("/api/trades", requireAuth, async (req, res) => {
+  const { marketId, side, action, quantity, priceCents } = req.body;
+
+  if (!marketId || !side || !action || !quantity || !priceCents) {
+    res.status(400).json({
+      error: "Missing required fields: marketId, side, action, quantity, priceCents",
+    });
+    return;
+  }
+
+  try {
+    const result = await prisma.$queryRaw<{ execute_trade: string }[]>`
+      SELECT execute_trade(
+        ${req.user!.id}::uuid,
+        ${marketId}::uuid,
+        ${side}::contract_side,
+        ${action}::trade_action,
+        ${quantity}::integer,
+        ${priceCents}::smallint
+      ) as execute_trade
+    `;
+
+    res.json({ tradeId: result[0].execute_trade });
+  } catch (err) {
+    console.error("Trade failed:", err);
+    // Postgres RAISE EXCEPTION messages (like "insufficient balance")
+    // land in err.message — surfacing that directly gives the
+    // frontend a real, useful error instead of a generic one.
+    const message = err instanceof Error ? err.message : "Trade failed";
+    res.status(400).json({ error: message });
+  }
 });
 
 app.listen(PORT, () => {
