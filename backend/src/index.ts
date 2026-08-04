@@ -34,17 +34,53 @@ app.get("/", (_req, res) => {
   res.json({ status: "ok", message: "paper-kalshi backend is running" });
 });
 
-// First real route: list markets from the database
-app.get("/api/markets", async (_req, res) => {
+// List markets — supports search, category filter, and pagination.
+//   ?q=fed              search title (case-insensitive)
+//   ?category=Politics  filter by category
+//   ?limit=50&offset=0  pagination (limit capped at 200)
+app.get("/api/markets", async (req, res) => {
   try {
-    const markets = await prisma.market.findMany({
-      orderBy: { createdAt: "desc" },
-      take: 50,
-    });
-    res.json(markets);
+    const q = typeof req.query.q === "string" ? req.query.q : undefined;
+    const category =
+      typeof req.query.category === "string" ? req.query.category : undefined;
+    const limit = Math.min(Number(req.query.limit) || 50, 200);
+    const offset = Number(req.query.offset) || 0;
+
+    const where = {
+      ...(q ? { title: { contains: q, mode: "insensitive" as const } } : {}),
+      ...(category ? { category } : {}),
+    };
+
+    const [markets, total] = await Promise.all([
+      prisma.market.findMany({
+        where,
+        orderBy: { volume: "desc" },
+        take: limit,
+        skip: offset,
+      }),
+      prisma.market.count({ where }),
+    ]);
+
+    res.json({ markets, total, limit, offset });
   } catch (err) {
     console.error("Failed to fetch markets:", err);
     res.status(500).json({ error: "Failed to fetch markets" });
+  }
+});
+
+// Distinct category list, for populating a filter dropdown on the frontend.
+app.get("/api/market-categories", async (_req, res) => {
+  try {
+    const rows = await prisma.market.findMany({
+      where: { category: { not: null } },
+      select: { category: true },
+      distinct: ["category"],
+      orderBy: { category: "asc" },
+    });
+    res.json(rows.map((r) => r.category));
+  } catch (err) {
+    console.error("Failed to fetch categories:", err);
+    res.status(500).json({ error: "Failed to fetch categories" });
   }
 });
 
@@ -165,6 +201,67 @@ app.get("/api/transactions", requireAuth, async (req, res) => {
   } catch (err) {
     console.error("Failed to fetch transactions:", err);
     res.status(500).json({ error: "Failed to fetch transactions" });
+  }
+});
+
+// Update the current user's profile (currently just username).
+app.patch("/api/profile", requireAuth, async (req, res) => {
+  const { username } = req.body;
+
+  if (!username || typeof username !== "string" || username.trim().length === 0) {
+    res.status(400).json({ error: "username is required" });
+    return;
+  }
+
+  try {
+    const updated = await prisma.profile.update({
+      where: { id: req.user!.id },
+      data: { username: username.trim() },
+    });
+    res.json(updated);
+  } catch (err) {
+    console.error("Failed to update profile:", err);
+    // Prisma throws a known error code (P2002) on unique constraint
+    // violations — username is unique, so a duplicate name lands here.
+    res.status(400).json({ error: "That username may already be taken." });
+  }
+});
+
+// Reset the current user's fake balance back to the starting amount.
+// Does NOT touch existing positions/trades — just the cash balance,
+// matching the "This action cannot be undone" framing in the mockup.
+app.post("/api/profile/reset", requireAuth, async (req, res) => {
+  try {
+    const updated = await prisma.profile.update({
+      where: { id: req.user!.id },
+      data: { balanceCents: 1_000_000 },
+    });
+    res.json(updated);
+  } catch (err) {
+    console.error("Failed to reset balance:", err);
+    res.status(500).json({ error: "Failed to reset balance" });
+  }
+});
+
+// Public leaderboard — top users by realized profit/loss.
+app.get("/api/leaderboard", async (_req, res) => {
+  try {
+    const profiles = await prisma.profile.findMany({
+      orderBy: { realizedPnlCents: "desc" },
+      take: 50,
+      select: {
+        id: true,
+        username: true,
+        realizedPnlCents: true,
+        totalTrades: true,
+        wins: true,
+        losses: true,
+      },
+    });
+    res.json(profiles);
+  } catch (err) {
+    console.error("Failed to fetch leaderboard:", err);
+    res.status(500).json({ error: "Failed to fetch leaderboard" });
   }
 });
 

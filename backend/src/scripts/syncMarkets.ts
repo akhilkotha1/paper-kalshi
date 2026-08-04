@@ -113,7 +113,7 @@ async function fetchEventsWithMarkets(): Promise<
   return collected;
 }
 
-async function main() {
+export async function runSync() {
   console.log("Fetching open events (with nested markets) from Kalshi...");
   const items = await fetchEventsWithMarkets();
   console.log(`\nCollected ${items.length} real markets total.\n`);
@@ -163,11 +163,16 @@ async function main() {
   console.log(`Saved/updated ${savedCount} markets in the database.`);
 }
 
-main()
-  .catch((err) => {
-    console.error("Sync failed:", err);
-    process.exit(1);
-  })
-  .finally(() => {
-    prisma.$disconnect();
-  });
+// Only run immediately if this file is executed directly
+// (npx tsx src/scripts/syncMarkets.ts) — NOT when imported by
+// syncLoop.ts, which calls runSync() itself on a timer instead.
+if (process.argv[1]?.endsWith("syncMarkets.ts")) {
+  runSync()
+    .catch((err) => {
+      console.error("Sync failed:", err);
+      process.exit(1);
+    })
+    .finally(() => {
+      prisma.$disconnect();
+    });
+}
