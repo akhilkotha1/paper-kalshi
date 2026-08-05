@@ -103,7 +103,22 @@ app.get("/api/markets/:id", async (req, res) => {
   }
 });
 
-// Protected test route — requires a valid Supabase login token.
+// Price history for one market, oldest to newest — powers the chart.
+// Only has data from whenever syncLoop.ts started running with the
+// price-snapshot feature; there's nothing before that.
+app.get("/api/markets/:id/price-history", async (req, res) => {
+  try {
+    const history = await prisma.priceHistory.findMany({
+      where: { marketId: req.params.id },
+      orderBy: { recordedAt: "asc" },
+      take: 500,
+    });
+    res.json(history);
+  } catch (err) {
+    console.error("Failed to fetch price history:", err);
+    res.status(500).json({ error: "Failed to fetch price history" });
+  }
+});
 // Try hitting this WITHOUT a token first (expect 401), then WITH
 // one (expect your user id + email back).
 app.get("/api/me", requireAuth, (req, res) => {

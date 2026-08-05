@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { authFetch } from "../lib/authFetch";
+import { PriceChart } from "../components/PriceChart";
 
 type Market = {
   id: string;
@@ -14,11 +15,18 @@ type Market = {
   closeTime: string | null;
 };
 
+type PricePoint = {
+  recordedAt: string;
+  yesPriceCents: number | null;
+  noPriceCents: number | null;
+};
+
 const API_URL = import.meta.env.VITE_API_URL;
 
 export function MarketDetailPage() {
   const { id } = useParams();
   const [market, setMarket] = useState<Market | null>(null);
+  const [priceHistory, setPriceHistory] = useState<PricePoint[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -44,9 +52,20 @@ export function MarketDetailPage() {
       });
   }
 
+  function loadPriceHistory() {
+    fetch(`${API_URL}/api/markets/${id}/price-history`)
+      .then((res) => res.json())
+      .then(setPriceHistory)
+      .catch((err) => console.error("Failed to fetch price history:", err));
+  }
+
   useEffect(() => {
     loadMarket();
-    const interval = setInterval(loadMarket, 15_000); // live-updating price
+    loadPriceHistory();
+    const interval = setInterval(() => {
+      loadMarket();
+      loadPriceHistory();
+    }, 15_000); // live-updating price + chart
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
@@ -139,6 +158,10 @@ export function MarketDetailPage() {
               {market.noBidCents ?? "—"}¢
             </p>
           </div>
+        </div>
+
+        <div className="mt-4 rounded-xl border border-gray-200 bg-white p-6">
+          <PriceChart data={priceHistory} />
         </div>
       </div>
 

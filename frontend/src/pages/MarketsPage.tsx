@@ -7,6 +7,8 @@ type Market = {
   title: string;
   category: string | null;
   status: string;
+  eventTicker: string;
+  eventTitle: string | null;
   yesBidCents: number | null;
   noBidCents: number | null;
   volume: string;
@@ -92,6 +94,21 @@ export function MarketsPage() {
 
   const totalPages = Math.ceil(total / PAGE_SIZE);
 
+  // Group the current page of results by event, so multi-outcome
+  // events (e.g. "Medic vs Rodriguez" with two candidate markets)
+  // render as one card with each market listed inside — instead of
+  // scattered flat rows. NOTE: grouping only happens within the
+  // current page's 25 results; an event whose markets straddle two
+  // pages will appear split. A fuller fix would group server-side.
+  const groups = new Map<string, { eventTitle: string; markets: Market[] }>();
+  for (const m of markets) {
+    const key = m.eventTicker;
+    if (!groups.has(key)) {
+      groups.set(key, { eventTitle: m.eventTitle || m.title, markets: [] });
+    }
+    groups.get(key)!.markets.push(m);
+  }
+
   return (
     <div>
       <h1 className="text-3xl font-bold text-gray-900">Markets</h1>
@@ -121,42 +138,71 @@ export function MarketsPage() {
         </select>
       </div>
 
-      <div className="mt-6 rounded-xl border border-gray-200 bg-white divide-y divide-gray-100">
-        {loading && <p className="p-6 text-gray-500">Loading markets...</p>}
-        {errorMessage && <p className="p-6 text-red-600">{errorMessage}</p>}
+      <div className="mt-6 space-y-4">
+        {loading && (
+          <p className="rounded-xl border border-gray-200 bg-white p-6 text-gray-500">
+            Loading markets...
+          </p>
+        )}
+        {errorMessage && (
+          <p className="rounded-xl border border-gray-200 bg-white p-6 text-red-600">
+            {errorMessage}
+          </p>
+        )}
         {!loading && !errorMessage && markets.length === 0 && (
-          <p className="p-6 text-gray-500">No markets match your filters.</p>
+          <p className="rounded-xl border border-gray-200 bg-white p-6 text-gray-500">
+            No markets match your filters.
+          </p>
         )}
 
-        {markets.map((market) => (
-          <Link
-            key={market.id}
-            to={`/markets/${market.id}`}
-            className="flex items-center gap-4 p-4 hover:bg-gray-50 transition-colors"
+        {Array.from(groups.entries()).map(([eventTicker, group]) => (
+          <div
+            key={eventTicker}
+            className="rounded-xl border border-gray-200 bg-white overflow-hidden"
           >
-            <div className="h-12 w-12 shrink-0 rounded-lg bg-green-50 flex items-center justify-center text-green-700 font-semibold">
-              {market.title.charAt(0)}
-            </div>
+            {/* Only show an event header when there's more than one
+                market under it — a single-market event doesn't need
+                a redundant wrapper title above its own name. */}
+            {group.markets.length > 1 && (
+              <div className="px-4 py-3 bg-gray-50 border-b border-gray-100">
+                <p className="font-semibold text-gray-900">{group.eventTitle}</p>
+              </div>
+            )}
+            <div className="divide-y divide-gray-100">
+              {group.markets.map((market) => (
+                <Link
+                  key={market.id}
+                  to={`/markets/${market.id}`}
+                  className="flex items-center gap-4 p-4 hover:bg-gray-50 transition-colors"
+                >
+                  <div className="h-10 w-10 shrink-0 rounded-lg bg-green-50 flex items-center justify-center text-green-700 font-semibold text-sm">
+                    {market.title.charAt(0)}
+                  </div>
 
-            <div className="flex-1 min-w-0">
-              <p className="font-medium text-gray-900 truncate">{market.title}</p>
-              <p className="text-sm text-gray-500">
-                {market.category && `${market.category} · `}
-                {Number(market.volume).toLocaleString()} vol
-                {market.closeTime &&
-                  ` · Ends ${new Date(market.closeTime).toLocaleDateString()}`}
-              </p>
-            </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-gray-900 truncate">
+                      {market.title}
+                    </p>
+                    <p className="text-sm text-gray-500">
+                      {market.category && `${market.category} · `}
+                      {Number(market.volume).toLocaleString()} vol
+                      {market.closeTime &&
+                        ` · Ends ${new Date(market.closeTime).toLocaleDateString()}`}
+                    </p>
+                  </div>
 
-            <div className="flex gap-2 shrink-0">
-              <span className="rounded-lg bg-green-50 px-3 py-1.5 text-sm font-semibold text-green-700">
-                Yes {market.yesBidCents ?? "—"}¢
-              </span>
-              <span className="rounded-lg bg-red-50 px-3 py-1.5 text-sm font-semibold text-red-700">
-                No {market.noBidCents ?? "—"}¢
-              </span>
+                  <div className="flex gap-2 shrink-0">
+                    <span className="rounded-lg bg-green-50 px-3 py-1.5 text-sm font-semibold text-green-700">
+                      Yes {market.yesBidCents ?? "—"}¢
+                    </span>
+                    <span className="rounded-lg bg-red-50 px-3 py-1.5 text-sm font-semibold text-red-700">
+                      No {market.noBidCents ?? "—"}¢
+                    </span>
+                  </div>
+                </Link>
+              ))}
             </div>
-          </Link>
+          </div>
         ))}
       </div>
 

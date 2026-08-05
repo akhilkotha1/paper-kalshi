@@ -121,13 +121,14 @@ export async function runSync() {
   let savedCount = 0;
 
   for (const { market: m, event } of items) {
-    await prisma.market.upsert({
+    const market = await prisma.market.upsert({
       where: { kalshiTicker: m.ticker },
       create: {
         kalshiTicker: m.ticker,
         eventTicker: m.event_ticker,
+        eventTitle: event.title,
         seriesTicker: event.series_ticker ?? null,
-        title: m.title || event.title,
+        title: m.yes_sub_title || m.title,
         subtitle: m.yes_sub_title ?? null,
         category: event.category ?? null,
         yesBidCents: dollarsToCents(m.yes_bid_dollars),
@@ -144,6 +145,7 @@ export async function runSync() {
         rawData: m,
       },
       update: {
+        eventTitle: event.title,
         category: event.category ?? null,
         yesBidCents: dollarsToCents(m.yes_bid_dollars),
         yesAskCents: dollarsToCents(m.yes_ask_dollars),
@@ -157,6 +159,18 @@ export async function runSync() {
         lastSyncedAt: new Date(),
       },
     });
+
+    // Record a price snapshot every cycle — this is what a chart
+    // reads from. Deliberately a separate insert (never an update)
+    // since each row is meant to be a permanent point in time.
+    await prisma.priceHistory.create({
+      data: {
+        marketId: market.id,
+        yesPriceCents: dollarsToCents(m.yes_bid_dollars),
+        noPriceCents: dollarsToCents(m.no_bid_dollars),
+      },
+    });
+
     savedCount++;
   }
 
