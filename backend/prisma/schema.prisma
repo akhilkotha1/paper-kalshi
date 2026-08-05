@@ -1,7 +1,5 @@
 // ============================================================
 // Paper Kalshi Clone — Prisma schema
-// Run `npx prisma migrate dev --name init` to create these
-// tables in your Supabase Postgres instance.
 // ============================================================
 
 generator client {
@@ -12,7 +10,9 @@ datasource db {
   provider = "postgresql"
 }
 
+// ------------------------------------------------------------
 // Enums
+// ------------------------------------------------------------
 enum MarketStatus {
   open
   closed
@@ -54,11 +54,12 @@ enum ResolutionResult {
   @@map("resolution_result")
 }
 
-// PROFILES — user info, fake balance, stats
-// Note: `id` is NOT declared as a Prisma relation to auth.users,
-// because Prisma only manages the `public` schema. The actual
-// foreign key + auto-create trigger are added via raw SQL in
-// supabase_auth_setup.sql after your first migration runs.
+// ------------------------------------------------------------
+// 1. PROFILES — user info, fake balance, stats
+// Note: `id` is NOT declared as a Prisma relation to auth.users
+// as a model Prisma manages — the actual foreign key + auto-create
+// trigger are added via raw SQL in supabase_auth_setup.sql.
+// ------------------------------------------------------------
 model Profile {
   id                 String   @id @db.Uuid
   username           String   @unique
@@ -82,11 +83,14 @@ model Profile {
   @@map("profiles")
 }
 
-//  MARKETS — cached market data from Kalshi
+// ------------------------------------------------------------
+// 2. MARKETS — cached market data from Kalshi
+// ------------------------------------------------------------
 model Market {
   id                String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   kalshiTicker      String       @unique @map("kalshi_ticker")
   eventTicker       String       @map("event_ticker")
+  eventTitle        String?      @map("event_title")
   seriesTicker      String?      @map("series_ticker")
 
   title             String
@@ -116,6 +120,7 @@ model Market {
   trades            Trade[]
   transactions      Transaction[]
   resolution        MarketResolution?
+  priceHistory      PriceHistory[]
 
   @@index([eventTicker])
   @@index([status])
@@ -123,7 +128,27 @@ model Market {
   @@map("markets")
 }
 
-//  POSITIONS — user holdings (YES/NO shares) per market
+// ------------------------------------------------------------
+// 2b. PRICE_HISTORY — periodic price snapshots, for charting
+// ------------------------------------------------------------
+model PriceHistory {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  marketId        String   @map("market_id") @db.Uuid
+
+  yesPriceCents   Int?     @map("yes_price_cents") @db.SmallInt
+  noPriceCents    Int?     @map("no_price_cents") @db.SmallInt
+
+  recordedAt      DateTime @default(now()) @map("recorded_at")
+
+  market          Market   @relation(fields: [marketId], references: [id], onDelete: Cascade)
+
+  @@index([marketId, recordedAt])
+  @@map("price_history")
+}
+
+// ------------------------------------------------------------
+// 3. POSITIONS — user holdings (YES/NO shares) per market
+// ------------------------------------------------------------
 model Position {
   id                  String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   userId              String       @map("user_id") @db.Uuid
@@ -148,7 +173,9 @@ model Position {
   @@map("positions")
 }
 
-// TRADES — all buy/sell actions
+// ------------------------------------------------------------
+// 4. TRADES — all buy/sell actions
+// ------------------------------------------------------------
 model Trade {
   id                     String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   userId                 String       @map("user_id") @db.Uuid
@@ -173,7 +200,9 @@ model Trade {
   @@map("trades")
 }
 
-//  TRANSACTIONS — cash movements (buy, sell, payout, etc.)
+// ------------------------------------------------------------
+// 5. TRANSACTIONS — cash movements (buy, sell, payout, etc.)
+// ------------------------------------------------------------
 model Transaction {
   id                   String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   userId               String          @map("user_id") @db.Uuid
@@ -190,13 +219,15 @@ model Transaction {
 
   profile              Profile   @relation(fields: [userId], references: [id], onDelete: Cascade)
   trade                Trade?    @relation(fields: [relatedTradeId], references: [id], onDelete: SetNull)
-  market               Market?   @relation(fields: [relatedMarketId], references: [id], onDelete: SetNull)
+  market                Market?   @relation(fields: [relatedMarketId], references: [id], onDelete: SetNull)
 
   @@index([userId, createdAt])
   @@map("transactions")
 }
 
-//  MARKET_RESOLUTIONS — final outcome of markets
+// ------------------------------------------------------------
+// 6. MARKET_RESOLUTIONS — final outcome of markets
+// ------------------------------------------------------------
 model MarketResolution {
   id                          String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   marketId                    String           @unique @map("market_id") @db.Uuid
